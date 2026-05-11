@@ -10,7 +10,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync, statSync, unwatchFile, watchFile } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ function findHeadPath(cwd: string): string | null {
           // Worktree: .git is a file containing "gitdir: <path>"
           const content = readFileSync(gitPath, "utf8").trim();
           if (content.startsWith("gitdir: ")) {
-            const gitDir = join(dir, content.slice(8).trim());
+            const gitDir = resolve(dir, content.slice(8).trim());
             return join(gitDir, "HEAD");
           }
         } else if (stat.isDirectory()) {
@@ -90,7 +90,6 @@ async function fetchPR(
 
 export default function (pi: ExtensionAPI) {
   let unwatchHead: (() => void) | undefined;
-  let lastBranch: string | undefined;
   let latestCtx: ExtensionContext | undefined;
 
   /** Refresh the PR status display. */
@@ -100,13 +99,8 @@ export default function (pi: ExtensionAPI) {
     // Clear if on main/master or not in a repo
     if (!branch || branch === "main" || branch === "master") {
       ctx.ui.setStatus("pr-status", undefined);
-      lastBranch = branch ?? undefined;
       return;
     }
-
-    // Skip if branch hasn't changed (avoids redundant gh calls)
-    if (branch === lastBranch) return;
-    lastBranch = branch;
 
     const pr = await fetchPR(pi, branch, ctx.cwd);
     if (pr) {
@@ -134,12 +128,13 @@ export default function (pi: ExtensionAPI) {
 
     // watchFile is poll-based (stat interval), which handles git's atomic
     // rename of HEAD correctly (unlike event-based fs.watch on the file).
-    watchFile(headPath, { interval: 500 }, () => {
+    const listener = () => {
       refreshFromWatcher();
-    });
+    };
+    watchFile(headPath, { interval: 2000 }, listener);
 
     unwatchHead = () => {
-      try { unwatchFile(headPath); } catch { /* ignore */ }
+      try { unwatchFile(headPath, listener); } catch { /* ignore */ }
     };
   }
 
@@ -152,8 +147,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     latestCtx = ctx;
-    lastBranch = undefined; // force refresh on new session
-    await refresh(ctx);
+    // Fire-and-forget to avoid blocking session initialization
+    refresh(ctx).catch(() => { /* ignore */ });
     startWatching(ctx.cwd);
   });
 
@@ -162,7 +157,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("pr-status", {
     description: "Refresh PR status in the footer",
     handler: async (_args, ctx) => {
-      lastBranch = undefined; // force refresh
       await refresh(ctx);
       ctx.ui.notify("PR status refreshed", "info");
     },
