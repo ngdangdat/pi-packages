@@ -65,10 +65,10 @@ async function fetchPR(
   pi: ExtensionAPI,
   branch: string,
   cwd: string,
-): Promise<{ number: number; title: string; state: string } | null> {
+): Promise<{ number: number; title: string; state: string; url: string } | null> {
   const result = await pi.exec(
     "gh",
-    ["pr", "list", "--head", branch, "--json", "number,title,state", "--limit", "1"],
+    ["pr", "list", "--head", branch, "--json", "number,title,state,url", "--limit", "1"],
     { cwd, timeout: 5_000 },
   );
 
@@ -79,6 +79,7 @@ async function fetchPR(
       number: number;
       title: string;
       state: string;
+      url: string;
     }>;
     return prs.length > 0 ? prs[0] : null;
   } catch {
@@ -106,7 +107,7 @@ export default function (pi: ExtensionAPI) {
     if (pr) {
       const icon =
         pr.state === "OPEN" ? "🟢" : pr.state === "MERGED" ? "🟣" : "🔴";
-      ctx.ui.setStatus("pr-status", `${icon} PR #${pr.number}: ${pr.title}`);
+      ctx.ui.setStatus("pr-status", `${icon} PR #${pr.number}: ${pr.title} (${pr.url})`);
     } else {
       ctx.ui.setStatus("pr-status", undefined);
     }
