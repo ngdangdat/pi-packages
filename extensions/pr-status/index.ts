@@ -107,7 +107,7 @@ export default function (pi: ExtensionAPI) {
     if (pr) {
       const icon =
         pr.state === "OPEN" ? "🟢" : pr.state === "MERGED" ? "🟣" : "🔴";
-      ctx.ui.setStatus("pr-status", `${icon} PR #${pr.number}: ${pr.title} (${pr.url})`);
+      ctx.ui.setStatus("pr-status", `${icon} PR #${pr.number} - ${pr.url}`);
     } else {
       ctx.ui.setStatus("pr-status", undefined);
     }
