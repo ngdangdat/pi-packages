@@ -145,7 +145,7 @@ export default function (pi: ExtensionAPI) {
       const pr = await fetchPR(pi, branch, ctx.cwd);
       if (pr) {
         const icon = pr.state === "OPEN" ? "🟢" : pr.state === "MERGED" ? "🟣" : "🔴";
-        statusTextParts.push(`${icon} PR #${pr.number}`);
+        statusTextParts.push(`${icon} PR #${pr.number} - ${pr.url}`);
       }
     }
 
