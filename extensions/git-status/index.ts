@@ -1,11 +1,11 @@
 /**
- * PR Status Extension
+ * Git Status Extension
  *
- * Displays the current branch's GitHub PR in Pi's status bar (footer).
- * Uses `gh pr list` to find the PR and `ctx.ui.setStatus()` to render it.
+ * Displays the current branch's GitHub PR in Pi's status bar (footer),
+ * along with information about uncommitted files and commits in local but not pushed.
  *
  * Auto-refreshes when the branch changes by watching .git/HEAD.
- * Provides `/pr-status` command for manual refresh.
+ * Provides `/git-status` command for manual refresh.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -87,29 +87,72 @@ async function fetchPR(
   }
 }
 
+/** Get uncommitted files and unpushed commits count. */
+async function fetchGitStatus(pi: ExtensionAPI, branch: string, cwd: string): Promise<{ uncommittedFiles: number; unpushedCommits: number }> {
+  let uncommittedFiles = 0;
+  let unpushedCommits = 0;
+
+  try {
+    const statusResult = await pi.exec("git", ["status", "--porcelain"], { cwd, timeout: 5000 });
+    uncommittedFiles = statusResult.stdout.trim().split("\n").filter(line => line.length > 0).length;
+  } catch {
+    // Ignore errors
+  }
+
+  try {
+    const logResult = await pi.exec("git", ["log", `origin/${branch}..HEAD`, "--oneline"], { cwd, timeout: 5000 });
+    unpushedCommits = logResult.stdout.trim().split("\n").filter(line => line.length > 0).length;
+  } catch {
+    // If there is an error (e.g., origin/branch doesn't exist), we might just count local commits
+    try {
+      const logResult = await pi.exec("git", ["log", "--oneline", "--not", "--remotes"], { cwd, timeout: 5000 });
+      unpushedCommits = logResult.stdout.trim().split("\n").filter(line => line.length > 0).length;
+    } catch {
+       // Ignore errors
+    }
+  }
+
+  return { uncommittedFiles, unpushedCommits };
+}
+
 // ── Extension ────────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
   let unwatchHead: (() => void) | undefined;
   let latestCtx: ExtensionContext | undefined;
 
-  /** Refresh the PR status display. */
+  /** Refresh the git status display. */
   async function refresh(ctx: ExtensionContext): Promise<void> {
     const branch = await resolveBranch(pi, ctx.cwd);
 
-    // Clear if on main/master or not in a repo
-    if (!branch || branch === "main" || branch === "master") {
-      ctx.ui.setStatus("pr-status", undefined);
+    // Clear if not in a repo
+    if (!branch) {
+      ctx.ui.setStatus("git-status", undefined);
       return;
     }
 
-    const pr = await fetchPR(pi, branch, ctx.cwd);
-    if (pr) {
-      const icon =
-        pr.state === "OPEN" ? "🟢" : pr.state === "MERGED" ? "🟣" : "🔴";
-      ctx.ui.setStatus("pr-status", `${icon} PR #${pr.number} - ${pr.url}`);
+    let statusTextParts = [];
+
+    const gitStatus = await fetchGitStatus(pi, branch, ctx.cwd);
+    if (gitStatus.uncommittedFiles > 0) {
+      statusTextParts.push(`📝 ${gitStatus.uncommittedFiles} uncommitted`);
+    }
+    if (gitStatus.unpushedCommits > 0) {
+      statusTextParts.push(`⬆️ ${gitStatus.unpushedCommits} unpushed`);
+    }
+
+    if (branch !== "main" && branch !== "master") {
+      const pr = await fetchPR(pi, branch, ctx.cwd);
+      if (pr) {
+        const icon = pr.state === "OPEN" ? "🟢" : pr.state === "MERGED" ? "🟣" : "🔴";
+        statusTextParts.push(`${icon} PR #${pr.number}`);
+      }
+    }
+
+    if (statusTextParts.length > 0) {
+      ctx.ui.setStatus("git-status", statusTextParts.join(" | "));
     } else {
-      ctx.ui.setStatus("pr-status", undefined);
+      ctx.ui.setStatus("git-status", undefined);
     }
   }
 
@@ -155,11 +198,11 @@ export default function (pi: ExtensionAPI) {
 
   // ── Command ──────────────────────────────────────────────────────────────
 
-  pi.registerCommand("pr-status", {
-    description: "Refresh PR status in the footer",
+  pi.registerCommand("git-status", {
+    description: "Refresh git status in the footer",
     handler: async (_args, ctx) => {
       await refresh(ctx);
-      ctx.ui.notify("PR status refreshed", "info");
+      ctx.ui.notify("Git status refreshed", "info");
     },
   });
 }
